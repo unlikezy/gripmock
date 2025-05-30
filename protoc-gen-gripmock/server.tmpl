@@ -15,6 +15,7 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	protobufproto "github.com/golang/protobuf/proto"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
@@ -75,8 +76,9 @@ type {{.Name}} struct{}
 {{ define "standard_method" }}
 func (s *{{.ServiceName}}) {{.Name}}(ctx context.Context, in *{{.Input}}) (*{{.Output}},error){
 	out := &{{.Output}}{}
+	outs := &[]interface{}{}
 	headers, _ := metadata.FromIncomingContext(ctx)
-	err := findStub(ctx, "{{.ServiceName}}", "{{.Name}}", headers, in, out)
+	err := findStub(ctx, "{{.ServiceName}}", "{{.Name}}", headers, in, out, outs)
 	if err != nil {
 		return nil, err
 	}
@@ -88,25 +90,40 @@ func (s *{{.ServiceName}}) {{.Name}}(ctx context.Context, in *{{.Input}}) (*{{.O
 {{ define "server_stream_method" }}
 func (s *{{.ServiceName}}) {{.Name}}(in *{{.Input}}, srv {{.SvcPackage}}{{.ServiceName}}_{{.Name}}Server) error {
 	out := &{{.Output}}{}
+	outs := &[]interface{}{}
 	headers, _ := metadata.FromIncomingContext(srv.Context())
-	err := findStub(srv.Context(), "{{.ServiceName}}", "{{.Name}}", headers, in, out)
+	err := findStub(srv.Context(), "{{.ServiceName}}", "{{.Name}}", headers, in, out, outs)
 	if err != nil {
 		return err
 	}
-	return srv.Send(out)
+	if outs != nil {
+		for _, o := range *outs {
+			o, ok := o.(*{{.Output}})
+			if !ok {
+				return fmt.Errorf("expected type %T, got %T", &{{.Output}}{}, o)
+			}
+			if err := srv.Send(o); err != nil {
+				return err
+			}
+		}
+	} else if err := srv.Send(out); err != nil{
+		return err
+	}
+	return nil
 }
 {{ end }}
 
 {{ define "client_stream_method"}}
 func (s *{{.ServiceName}}) {{.Name}}(srv {{.SvcPackage}}{{.ServiceName}}_{{.Name}}Server) error {
 	out := &{{.Output}}{}
+	outs := &[]interface{}{}
 	for {
 		input,err := srv.Recv()
 		if err == io.EOF {
 			return srv.SendAndClose(out)
 		}
 		headers, _ := metadata.FromIncomingContext(srv.Context())
-		err = findStub(srv.Context(), "{{.ServiceName}}","{{.Name}}", headers, input, out)
+		err = findStub(srv.Context(), "{{.ServiceName}}","{{.Name}}", headers, input, out, outs)
 		if err != nil {
 			return err
 		}
@@ -127,12 +144,22 @@ func (s *{{.ServiceName}}) {{.Name}}(srv {{.SvcPackage}}{{.ServiceName}}_{{.Name
 
 		headers, _ := metadata.FromIncomingContext(srv.Context())
 		out := &{{.Output}}{}
-		err = findStub(srv.Context(), "{{.ServiceName}}","{{.Name}}", headers, in, out)
+		outs := &[]interface{}{}
+		err = findStub(srv.Context(), "{{.ServiceName}}","{{.Name}}", headers, in, out, outs)
 		if err != nil {
 			return err
 		}
-
-		if err := srv.Send(out); err != nil{
+		if outs != nil {
+			for _, o := range *outs {
+				o, ok := o.(*{{.Output}})
+				if !ok {
+					return fmt.Errorf("expected type %T, got %T", &{{.Output}}{}, o)
+				}
+				if err := srv.Send(o); err != nil {
+					return err
+				}
+			}
+		} else if err := srv.Send(out); err != nil{
 			return err
 		}
 	}
@@ -154,12 +181,13 @@ type payload struct {
 
 type response struct {
 	Data  interface{} `json:"data"`
+	Datas  []interface{} `json:"datas"`
 	Error string      `json:"error"`
 	Code  *codes.Code `json:"code,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
-func findStub(ctx context.Context, service, method string, headers metadata.MD, in, out protoiface.MessageV1) error {
+func findStub(ctx context.Context, service, method string, headers metadata.MD, in, out protobufproto.Message, outs *[]interface{}) error {
 	url := fmt.Sprintf("http://localhost%s/find", HTTP_PORT)
 	var headersMap map[string]string
 	if headers != nil {
@@ -212,6 +240,25 @@ func findStub(ctx context.Context, service, method string, headers metadata.MD, 
     }
 
 	data, _ := json.Marshal(respRPC.Data)
-	return jsonpb.Unmarshal(bytes.NewReader(data), out)
+	err1 := jsonpb.Unmarshal(bytes.NewReader(data), out)
+
+	fmt.Println("Datas:", respRPC.Datas)
+	for _, d := range respRPC.Datas {
+		fmt.Println("d:", d)
+		var err2 error
+		md, _ := json.Marshal(d)
+		fmt.Println("Marshal data:", md)
+		o := protobufproto.Clone(out)
+		err2 = jsonpb.Unmarshal(bytes.NewReader(md), o)
+		if err2 != nil {
+			return fmt.Errorf("unmarshalling response data %v",err2)
+		}
+		fmt.Println("o:", o)
+		*outs = append(*outs, o)
+	}
+	if err1 != nil {
+		return fmt.Errorf("unmarshalling response %v",err1)
+	}
+	return nil
 }
 {{ end }}

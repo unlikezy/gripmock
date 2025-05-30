@@ -80,10 +80,11 @@ type InputHeaders struct {
 }
 
 type Output struct {
-	Data    map[string]interface{} `json:"data"`
-	Error   string                 `json:"error"`
-	Code    *codes.Code            `json:"code,omitempty"`
-	Headers map[string]string      `json:"headers,omitempty"`
+	Data    map[string]interface{}   `json:"data"`
+	Datas   []map[string]interface{} `json:"datas,omitempty"`
+	Error   string                   `json:"error"`
+	Code    *codes.Code              `json:"code,omitempty"`
+	Headers map[string]string        `json:"headers,omitempty"`
 }
 
 func addStub(w http.ResponseWriter, r *http.Request) {
