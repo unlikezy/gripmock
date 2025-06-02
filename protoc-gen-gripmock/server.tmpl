@@ -96,7 +96,7 @@ func (s *{{.ServiceName}}) {{.Name}}(in *{{.Input}}, srv {{.SvcPackage}}{{.Servi
 	if err != nil {
 		return err
 	}
-	if outs != nil {
+	if len(*outs) != 0 {
 		for _, o := range *outs {
 			o, ok := o.(*{{.Output}})
 			if !ok {
@@ -149,7 +149,7 @@ func (s *{{.ServiceName}}) {{.Name}}(srv {{.SvcPackage}}{{.ServiceName}}_{{.Name
 		if err != nil {
 			return err
 		}
-		if outs != nil {
+		if len(*outs) != 0 {
 			for _, o := range *outs {
 				o, ok := o.(*{{.Output}})
 				if !ok {
@@ -241,6 +241,11 @@ func findStub(ctx context.Context, service, method string, headers metadata.MD, 
 
 	data, _ := json.Marshal(respRPC.Data)
 	err1 := jsonpb.Unmarshal(bytes.NewReader(data), out)
+	if err1 != nil {
+		return fmt.Errorf("unmarshalling response data %v",err1)
+	} else {
+		fmt.Println("Data:", respRPC.Data)
+	}
 
 	fmt.Println("Datas:", respRPC.Datas)
 	for _, d := range respRPC.Datas {
@@ -255,9 +260,6 @@ func findStub(ctx context.Context, service, method string, headers metadata.MD, 
 		}
 		fmt.Println("o:", o)
 		*outs = append(*outs, o)
-	}
-	if err1 != nil {
-		return fmt.Errorf("unmarshalling response %v",err1)
 	}
 	return nil
 }
